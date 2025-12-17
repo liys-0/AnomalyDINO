@@ -20,10 +20,10 @@ Alternatively, prepare your own dataset accordingly:
     ```
     your_data_root
     ├── object1
-    │   ├── ground_truth        # anomaly annotations per anomaly type
+    │   ├── ground_truth        # anomaly annotations per anomaly type (optional)
     │   │   ├── anomaly_type1
     │   │   ├── ...
-    │   ├── test                # test images per anomaly type & 'good'
+    │   ├── test                # test images per anomaly type & 'good' (if applicable)
     │   │   ├── anomaly_type1    
     │   │   ├── ...
     │   │   └── good
@@ -32,7 +32,7 @@ Alternatively, prepare your own dataset accordingly:
     ├── object2
     │   ├── ...
     ```
-
+When no 'good' test set is available, just inference is performed (no evaluation of detection/segmentation metrics possible).
 
 ## Usage
 

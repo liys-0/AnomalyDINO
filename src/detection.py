@@ -50,9 +50,13 @@ def run_anomaly_detection(
 
     assert knn_metric in ["L2", "L2_normalized"]
     
-    # add 'good' to the anomaly types
     type_anomalies = object_anomalies[object_name]
-    type_anomalies.append('good')
+    # add 'good' to the anomaly types, if exists...
+    good_folder = f"{data_root}/{object_name}/test/good/"
+    if os.path.exists(good_folder):
+        type_anomalies.append('good')
+    else:
+        print(f"Warning: no 'good' test folder for {object_name} (expected to be at {good_folder})! Just running inference, no evaluation will be performed.")
 
     # ensure that each type is only evaluated once
     type_anomalies = list(set(type_anomalies))
@@ -103,6 +107,7 @@ def run_anomaly_detection(
         
         features_ref = np.concatenate(features_ref, axis=0).astype('float32')
 
+        # print(f"Number of reference patches for {object_name}: {features_ref.shape[0]}")
         if faiss_on_cpu:
             # similariy search on CPU
             knn_index = faiss.IndexFlatL2(features_ref.shape[1])
@@ -137,7 +142,7 @@ def run_anomaly_detection(
             if save_patch_dists or save_tiffs:
                 os.makedirs(f"{plots_dir}/anomaly_maps/seed={seed}/{object_name}/test/{type_anomaly}", exist_ok=True)
             
-            for idx, img_test_nr in enumerate(sorted(os.listdir(data_dir))):
+            for idx, img_test_nr in tqdm(enumerate(sorted(os.listdir(data_dir))), desc=f"Evaluating object_name'{type_anomaly}'", leave=False, total=len(os.listdir(data_dir))):
                 # start measuring time (inference)
                 start_time = time.time()
                 image_test_path = f"{data_dir}/{img_test_nr}"

@@ -60,7 +60,7 @@ if __name__=="__main__":
     print(f"Requested to run {len(args.shots)} (different) shot(s):", args.shots)
     print(f"Requested to repeat the experiments {args.num_seeds} time(s).")
 
-    objects, object_anomalies, masking_default, rotation_default = get_dataset_info(args.dataset, args.preprocess)
+    objects, object_anomalies, masking_default, rotation_default = get_dataset_info(args.dataset, args.preprocess, data_path=args.data_root)
 
     # set CUDA device
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device[-1])
@@ -68,7 +68,7 @@ if __name__=="__main__":
 
     if not args.model_name.startswith("dinov2"):
         masking_default = {o: False for o in objects}
-        print("Caution: Only DINOv2 supports 0-shot masking (for now)!")    
+        print("Caution: Only DINOv2 supports 0-shot masking (for now)!")
 
     if args.just_seed != None:
         seeds = [args.just_seed]
@@ -105,8 +105,8 @@ if __name__=="__main__":
                 print(f"Results for shot {shot}, seed {seed} already exist. Skipping.")
                 continue
             else:
-                timeit_file = results_dir + "/time_measurements.csv"
-                with open(timeit_file, 'w', newline='') as file:
+                measurements_file = results_dir + f"/measurements_seed={seed}.csv"
+                with open(measurements_file, 'w', newline='') as file:
                     writer = csv.writer(file)
                     writer.writerow(["Object", "Sample", "Anomaly_Score", "MemoryBank_Time", "Inference_Time"])
 
@@ -148,30 +148,38 @@ if __name__=="__main__":
                         # print(f"Mean inference time ({object_name}): {sum(time_inference.values())/len(time_inference):.5f} s/sample")                        
 
                 # read inference times from file
-                with open(timeit_file, 'r') as file:
+                with open(measurements_file, 'r') as file:
                     reader = csv.reader(file)
                     next(reader)
                     inference_times = [float(row[4]) for row in reader]
-                print(f"Finished AD for {len(objects)} objects (seed {seed}), mean inference time: {sum(inference_times)/len(inference_times):.5f} s/sample")
+                print(f"Finished AD for {len(objects)} objects (seed {seed}), mean inference time: {sum(inference_times)/len(inference_times):.5f} s/sample = {len(inference_times)/(sum(inference_times)+1e-10):.2f} samples/s")
 
-                # evaluate all finished runs and create sample anomaly maps for inspection
-                print(f"=========== Evaluate seed = {seed} ===========")
-                eval_finished_run(args.dataset, 
-                                args.data_root, 
-                                anomaly_maps_dir = results_dir + f"/anomaly_maps/seed={seed}", 
-                                output_dir = results_dir,
-                                seed = seed,
-                                pro_integration_limit = 0.3,
-                                eval_clf = args.eval_clf,
-                                eval_segm = args.eval_segm)
-                
-                create_sample_plots(results_dir, 
+                # check wheter 'good' folder exists for testing
+                for object_name in objects:
+                    good_folder = f"{args.data_root}/{object_name}/test/good/"
+                    if not os.path.exists(good_folder):
+                        print(f"Warning: 'good' folder not found for {object_name}! No evaluation will be performed for seed {seed}.")
+                        print("Finished AD without evaluation, inference results saved to", results_dir)
+                        break
+                else:
+                    # evaluate all finished runs and create sample anomaly maps for inspection
+                    print(f"=========== Evaluate seed = {seed} ===========")
+                    eval_finished_run(args.dataset, 
+                                    args.data_root, 
                                     anomaly_maps_dir = results_dir + f"/anomaly_maps/seed={seed}", 
+                                    output_dir = results_dir,
                                     seed = seed,
-                                    dataset = args.dataset, 
-                                    data_root = args.data_root)
-            
-                # deactivate creation of examples for the next seeds...
-                save_examples = False 
+                                    pro_integration_limit = 0.3,
+                                    eval_clf = args.eval_clf,
+                                    eval_segm = args.eval_segm)
+                    
+                    create_sample_plots(results_dir, 
+                                        anomaly_maps_dir = results_dir + f"/anomaly_maps/seed={seed}", 
+                                        seed = seed,
+                                        dataset = args.dataset, 
+                                        data_root = args.data_root)
+                
+                    # deactivate creation of examples for the next seeds...
+                    save_examples = False 
 
     print("Finished and evaluated all runs!")

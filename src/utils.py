@@ -2,7 +2,7 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
-
+import os
 
 def augment_image(img_ref, augmentation = "rotate", angles = [0, 45, 90, 135, 180, 225, 270, 315]):
     """
@@ -69,7 +69,7 @@ def plot_ref_images(img_list, mask_list, vis_background_list, grid_size, save_pa
     plt.close()
 
 
-def get_dataset_info(dataset, preprocess):
+def get_dataset_info(dataset, preprocess, data_path=None):
 
     if preprocess not in ["informed", "agnostic", "masking_only", "informed_no_mask", "agnostic_no_mask", "force_no_mask_no_rotation", "force_mask_no_rotation", "force_no_mask_rotation", "force_mask_rotation"]:
         # masking only: deactivate rotation, apply masking like in informed/agnostic
@@ -167,7 +167,30 @@ def get_dataset_info(dataset, preprocess):
         elif preprocess in ["informed", "masking_only", "informed_no_mask"]:
             rotation_default = {o: False for o in objects}
     else:
-        raise ValueError(f"Dataset '{dataset}' not yet covered!")
+        # raise ValueError(f"Dataset '{dataset}' not yet covered!")
+        print(f"Dataset '{dataset}' not yet covered! Trying to infer objects from data_path, using default setting ('agnostic_no_mask').")
+        preprocess = "agnostic_no_mask" # adapt this to your needs -> create custom settings as needed like for MVTec or VisA above
+
+        if data_path is None:
+            raise ValueError("Please provide 'data_path' when using custom dataset!")
+        
+        objects = []
+        object_anomalies = {}
+        masking_default = {}
+        rotation_default = {}
+        for o in os.listdir(data_path):
+            if os.path.isdir(os.path.join(data_path, o)):
+                objects.append(o)
+                masking_default[o] = False
+                rotation_default[o] = True
+                # infer anomaly types
+                anomalies_path = os.path.join(data_path, o)
+                anomaly_types = []
+                for anomalytype in os.listdir(os.path.join(anomalies_path, "test")):
+                    if anomalytype != "good" and os.path.isdir(os.path.join(anomalies_path, "test", anomalytype)):
+                        anomaly_types.append(anomalytype)
+                object_anomalies[o] = anomaly_types
+        print(f"Found {len(objects)} objects: {objects} with on average {np.mean([len(object_anomalies[o]) for o in objects]):.1f} anomaly types per object.")
 
     if preprocess == "force_no_mask_no_rotation":
         masking_default = {o: False for o in objects}

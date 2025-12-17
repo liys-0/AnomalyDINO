@@ -154,7 +154,7 @@ def evaluate_ad_batched(model,
             # empty CUDA cache
             torch.cuda.empty_cache()
             
-    print("Average inference time per sample:", np.mean(inference_times))
+    print(f"Average inference time per sample: {np.mean(inference_times):.5f} s/sample = {1.0/np.mean(inference_times):.2f} samples/s")
     return AUROCs
 
 if __name__=="__main__":

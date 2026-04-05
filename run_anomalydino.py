@@ -44,11 +44,16 @@ def parse_args():
     parser.add_argument('--save_examples', default=True, action=argparse.BooleanOptionalAction, help="Save example plots.")
     parser.add_argument("--eval_clf", default=True, action=argparse.BooleanOptionalAction, help="Evaluate anomaly detection performance.")
     parser.add_argument("--eval_segm", default=False, action=argparse.BooleanOptionalAction, help="Evaluate anomaly segmentation performance.")
-    parser.add_argument("--device", default='cuda:0')
+    parser.add_argument("--device", default='cuda:1')
     parser.add_argument("--warmup_iters", type=int, default=25, help="Number of warmup iterations, relevant when benchmarking inference time.")
 
     parser.add_argument("--tag", help="Optional tag for the saving directory.")
-
+    
+    parser.add_argument("--use_cad", default=False)
+    parser.add_argument("--fuse_mode", default="concat")
+    
+    parser.add_argument("--use_gen", default=False)
+    
     args = parser.parse_args()
     return args
 
@@ -138,7 +143,12 @@ if __name__=="__main__":
                                                                                 rotation = rotation_default[object_name],
                                                                                 seed = seed,
                                                                                 save_patch_dists = args.eval_clf, # save patch distances for detection evaluation
-                                                                                save_tiffs = args.eval_segm)      # save anomaly maps as tiffs for segmentation evaluation
+                                                                                save_tiffs = args.eval_segm,# save anomaly maps as tiffs for segmentation evaluation
+                                                                                
+                                                                                use_cad = args.use_cad,
+                                                                                cad_dirname = "cad",
+                                                                                fuse_mode = args.fuse_mode, # concat /img_diff_concat/sum
+                                                                                fuse_alpha = 0.5)      
                         
                         # write anomaly scores and inference times to file
                         for counter, sample in enumerate(anomaly_scores.keys()):

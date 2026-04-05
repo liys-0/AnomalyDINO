@@ -27,7 +27,13 @@ def run_anomaly_detection(
         faiss_on_cpu = False,
         seed = 0,
         save_patch_dists = True,
-        save_tiffs = False):
+        save_tiffs = False,
+        use_gen = True,          # NEW
+        gen_dirname = "gen",
+        use_cad = True, # NEW
+        cad_dirname = "cad", # NEW: folder name under object
+        fuse_mode = "concat", # NEW: "concat" | "img_diff_concat" | "sum"
+        fuse_alpha = 0.5): # NEW: used if fuse_mode == "sum"
     """
     Main function to evaluate the anomaly detection performance of a given object/product.
 
@@ -50,6 +56,65 @@ def run_anomaly_detection(
 
     assert knn_metric in ["L2", "L2_normalized"]
     
+    def _read_rgb(path):
+        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        if img is None:
+            raise FileNotFoundError(f"Could not read image: {path}")
+        return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    def _cad_path_train(img_name):
+        return f"{data_root}/{object_name}/{cad_dirname}/{img_name}"
+
+    def _cad_path_test(type_anomaly, img_name):
+        return f"{data_root}/{object_name}/{cad_dirname}/{img_name}"
+        
+        
+    def _gen_path_train(img_name):
+        return f"{data_root}/{object_name}/{gen_dirname}/{img_name}"
+
+    def _gen_path_test(type_anomaly, img_name):
+        return f"{data_root}/{object_name}/{gen_dirname}/{img_name}"
+
+    
+    def _fuse(F_img, F_cad, F_gen):
+        # all are numpy arrays [N_patches, D]
+        if fuse_mode == "concat":
+            return np.concatenate([F_img, F_cad, F_gen], axis=1)  # [N, 3D]
+
+        if fuse_mode == "img_diff_concat":
+            # common options (pick one):
+            # A) concat raw + diffs (6D total)
+            # return np.concatenate([F_img, F_cad, F_gen, (F_img - F_cad), (F_img - F_gen), (F_cad - F_gen)], axis=1)
+
+            # B) concat only diffs (3D total)
+            return np.concatenate([(F_img - F_cad), (F_img - F_gen), (F_cad - F_gen)], axis=1)
+
+        if fuse_mode == "sum":
+            # weighted sum of 3 sources (simple equal mixing by default)
+            # You can customize weights if you want
+            #w_img, w_cad, w_gen = 1/3, 1/3, 1/3 recall 1 Ap-0.35? F1=0.43  Acc=0.28
+            w_img, w_cad, w_gen = 1/3, 1/3, 1/10
+            return w_img * F_img + w_cad * F_cad + w_gen * F_gen
+
+        raise ValueError(f"Unknown fuse_mode={fuse_mode}")
+    
+    
+    
+    #def _fuse(F_img, F_cad):
+    #    # both are numpy arrays [N_patches, D]
+    #    if fuse_mode == "concat":
+    #        return np.concatenate([F_img, F_cad], axis=1)              # [N, 2D]
+    #    if fuse_mode == "img_diff_concat":
+    #        #return np.concatenate([F_img, (F_img - F_cad)], axis=1)    # [N, 2D]
+            
+    #        return np.concatenate([(F_img - F_cad)], axis=1)    # [N, 2D]
+    #    if fuse_mode == "sum":
+    #        return fuse_alpha * F_img + (1.0 - fuse_alpha) * F_cad     # [N, D]
+    #    
+    #    raise ValueError(f"Unknown fuse_mode={fuse_mode}")
+
+
+
     type_anomalies = object_anomalies[object_name]
     # add 'good' to the anomaly types, if exists...
     good_folder = f"{data_root}/{object_name}/test/good/"
@@ -73,7 +138,23 @@ def run_anomaly_detection(
         img_ref_samples = sorted(os.listdir(img_ref_folder))
     else:
         # few-shot setting, pick samples in deterministic fashion according to seed
+        """
         img_ref_samples = sorted(os.listdir(img_ref_folder))[seed*n_ref_samples:(seed + 1)*n_ref_samples]
+        
+        print(seed*n_ref_samples)
+        print((seed + 1)*n_ref_samples)
+        """
+        all_imgs = sorted(os.listdir(img_ref_folder))
+        N = len(all_imgs)
+        K = n_ref_samples  # shots
+
+        if K >= N:
+            img_ref_samples = all_imgs  # just take all
+        else:
+            indices = np.linspace(0, N - 1, K, dtype=int)
+            img_ref_samples = [all_imgs[i] for i in indices]
+            print(indices)
+
 
     if len(img_ref_samples) < n_ref_samples:
         print(f"Warning: Not enough reference samples for {object_name}! Only {len(img_ref_samples)} samples available.")
@@ -97,14 +178,72 @@ def run_anomaly_detection(
                 features_ref_i = model.extract_features(image_ref_tensor)
                 
                 # compute background mask and discard background patches
+                mask_ref = model.compute_background_mask(
+            features_ref_i, grid_size1, threshold=10,
+            masking_type=(mask_ref_images and masking)
+        )
+
+                if use_cad or use_gen:
+            # start from real/pfib features
+                    F_img = features_ref_i
+
+            # CAD
+                    if use_cad:
+                        cad_path = _cad_path_train(img_ref_n)
+                        cad_img = _read_rgb(cad_path)
+                        cad_tensor, cad_grid = model.prepare_image(cad_img)
+                        F_cad = model.extract_features(cad_tensor)
+
+                        if tuple(cad_grid) != tuple(grid_size1) or F_cad.shape[0] != F_img.shape[0]:
+                            raise RuntimeError(f"CAD/real grid mismatch for {img_ref_n}: real={grid_size1}, cad={cad_grid}")
+                    else:
+                        F_cad = np.zeros_like(F_img)  # placeholder if disabled
+
+            # GEN
+                    if use_gen:
+                        gen_path = _gen_path_train(img_ref_n)
+                        gen_img = _read_rgb(gen_path)
+                        gen_tensor, gen_grid = model.prepare_image(gen_img)
+                        F_gen = model.extract_features(gen_tensor)
+
+                        if tuple(gen_grid) != tuple(grid_size1) or F_gen.shape[0] != F_img.shape[0]:
+                            raise RuntimeError(f"GEN/real grid mismatch for {img_ref_n}: real={grid_size1}, gen={gen_grid}")
+                    else:
+                        F_gen = np.zeros_like(F_img)  # placeholder if disabled
+
+                    fused = _fuse(F_img, F_cad, F_gen)
+                    features_ref.append(fused[mask_ref])
+                else:
+                    features_ref.append(features_ref_i[mask_ref])
+                
+                """
+                # compute background mask and discard background patches
                 mask_ref = model.compute_background_mask(features_ref_i, grid_size1, threshold=10, masking_type=(mask_ref_images and masking))
-                features_ref.append(features_ref_i[mask_ref])
+                
+                if use_cad:
+                    cad_path = _cad_path_train(img_ref_n)
+                    cad_img = _read_rgb(cad_path)
+                    cad_tensor, cad_grid = model.prepare_image(cad_img)
+                    features_cad_i = model.extract_features(cad_tensor)
+
+                    # sanity: patch grid must match
+                    if tuple(cad_grid) != tuple(grid_size1) or features_cad_i.shape[0] != features_ref_i.shape[0]:
+                        raise RuntimeError(f"CAD/real grid mismatch for {img_ref_n}: real={grid_size1}, cad={cad_grid}")
+
+                    fused = _fuse(features_ref_i, features_cad_i)
+                    features_ref.append(fused[mask_ref])
+                    #print("Ref real dim:", features_ref_i.shape, "Ref CAD dim:", features_cad_i.shape, "Ref fused dim:", fused.shape)
+                else:
+                    features_ref.append(features_ref_i[mask_ref])
+                """
+                
                 if save_examples:
                     images_ref.append(image_ref)
                     vis_image_background = model.get_embedding_visualization(features_ref_i, grid_size1, mask_ref)
                     masks_ref.append(mask_ref)
                     vis_backgroud.append(vis_image_background)
-        
+                
+                
         features_ref = np.concatenate(features_ref, axis=0).astype('float32')
 
         # print(f"Number of reference patches for {object_name}: {features_ref.shape[0]}")
@@ -157,6 +296,50 @@ def run_anomaly_detection(
                     mask2 = model.compute_background_mask(features2, grid_size2, threshold=10, masking_type=masking)
                 else:
                     mask2 = np.ones(features2.shape[0], dtype=bool)
+        
+                """
+                # fuse CAD features
+                if use_cad:
+                    cad_path = _cad_path_test(type_anomaly, img_test_nr)
+                    cad_img = _read_rgb(cad_path)
+                    cad_tensor2, cad_grid2 = model.prepare_image(cad_img)
+                    features2_cad = model.extract_features(cad_tensor2)
+
+                    if tuple(cad_grid2) != tuple(grid_size2) or features2_cad.shape[0] != features2.shape[0]:
+                        raise RuntimeError(f"CAD/real grid mismatch for {img_test_nr}: real={grid_size2}, cad={cad_grid2}")
+
+                    features2 = _fuse(features2, features2_cad)
+                """
+                
+                # fuse CAD + GEN features
+                if use_cad or use_gen:
+                    F_img = features2
+
+                    if use_cad:
+                        cad_path = _cad_path_test(type_anomaly, img_test_nr)
+                        cad_img = _read_rgb(cad_path)
+                        cad_tensor2, cad_grid2 = model.prepare_image(cad_img)
+                        F_cad = model.extract_features(cad_tensor2)
+
+                        if tuple(cad_grid2) != tuple(grid_size2) or F_cad.shape[0] != F_img.shape[0]:
+                            raise RuntimeError(f"CAD/real grid mismatch for {img_test_nr}: real={grid_size2}, cad={cad_grid2}")
+                    else:
+                        F_cad = np.zeros_like(F_img)
+
+                    if use_gen:
+                        gen_path = _gen_path_test(type_anomaly, img_test_nr)
+                        gen_img = _read_rgb(gen_path)
+                        gen_tensor2, gen_grid2 = model.prepare_image(gen_img)
+                        F_gen = model.extract_features(gen_tensor2)
+
+                        if tuple(gen_grid2) != tuple(grid_size2) or F_gen.shape[0] != F_img.shape[0]:
+                            raise RuntimeError(f"GEN/real grid mismatch for {img_test_nr}: real={grid_size2}, gen={gen_grid2}")
+                    else:
+                        F_gen = np.zeros_like(F_img)
+
+                    features2 = _fuse(F_img, F_cad, F_gen)
+                
+                
                 if save_examples and idx < 3:
                     vis_image_test_background = model.get_embedding_visualization(features2, grid_size2, mask2)
 

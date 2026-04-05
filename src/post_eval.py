@@ -3,7 +3,7 @@ This evaluation scripts partly builds on the official evaluation script for MVTe
 """
 
 import json
-from sklearn.metrics import auc, roc_auc_score, average_precision_score, f1_score, precision_recall_curve, pairwise
+from sklearn.metrics import auc, roc_auc_score, average_precision_score, f1_score, precision_recall_curve, pairwise, accuracy_score, recall_score
 import numpy as np
 import os
 import numpy as np
@@ -343,6 +343,28 @@ def eval_segmentation(gt_filenames, prediction_filenames, pro_integration_limit=
 
     print(f"F1 (pixel-level): {f1_px}")
 
+
+    from sklearn.metrics import accuracy_score, recall_score, precision_score
+
+    # Find best threshold based on F1
+    best_idx = np.nanargmax(f1_scores)
+    best_threshold = thresholds[best_idx]
+
+    # Binarize predictions using best threshold
+    pred_binary = (predictions >= best_threshold).astype(np.uint8)
+
+    # Compute metrics
+    acc_px = accuracy_score(ground_truth, pred_binary)
+    recall_px = recall_score(ground_truth, pred_binary)
+    precision_px = precision_score(ground_truth, pred_binary)
+
+    print(f"Accuracy (pixel-level): {acc_px}", end=" -- ")
+    print(f"Recall (pixel-level): {recall_px}", end=" -- ")
+    print(f"Precision (pixel-level): {precision_px}")
+
+
+
+
     # optionally delete all tiff files in the anomaly_maps_dir to save disk space
     if delete_tiff_files:
         for pred_name in prediction_filenames:
@@ -404,12 +426,33 @@ def eval_classification(gt_filenames, prediction_filenames, aggregation_statisti
     f1_clf = np.max(f1_scores[np.isfinite(f1_scores)])
     
     print(f"F1 (image-level): {f1_clf}")
-    return auroc_clf, ap_clf, f1_clf
+
+    best_idx = np.nanargmax(f1_scores)
+
+    # IMPORTANT: thresholds is shorter than precisions/recalls by 1
+    if best_idx >= len(thresholds):
+        best_idx = len(thresholds) - 1
+    
+    best_threshold = thresholds[best_idx]
+    
+    # Binarize predictions using best F1 threshold
+    pred_binary = (predictions >= best_threshold).astype(np.uint8)
+
+    # Accuracy and Recall
+    acc_clf = accuracy_score(binary_labels, pred_binary)
+    recall_clf = recall_score(binary_labels, pred_binary)
+
+    print(f"Accuracy (image-level): {acc_clf}", end=" -- ")
+    print(f"Recall (image-level): {recall_clf}")
+
+
+    return auroc_clf, ap_clf, f1_clf, acc_clf, recall_clf
 
 
 def get_objects_from_dataset(dataset):
     if dataset == "MVTec":
-        objects = ["bottle", "cable", "capsule", "carpet", "grid", "hazelnut", "leather", "metal_nut", "pill", "screw", "tile", "toothbrush", "transistor", "wood", "zipper"]
+        #objects = ["bottle", "cable", "capsule", "carpet", "grid", "hazelnut", "leather", "metal_nut", "pill", "screw", "tile", "toothbrush", "transistor", "wood", "zipper"]
+        objects = ["pcb"]
     elif dataset == "VisA":
         objects = ["candle", "capsules", "cashew", "chewinggum", "fryum", "macaroni1", "macaroni2", "pcb1", "pcb2", "pcb3", "pcb4", "pipe_fryum"]
     return objects
@@ -439,10 +482,14 @@ def eval_finished_run(dataset, dataset_base_dir, anomaly_maps_dir, output_dir, s
     au_pro_ls = []
     auroc_px_ls = []
     f1_px_ls = []
+    acc_px_ls = []
+    recall_px_ls = []
 
     auroc_clf_ls = []
     ap_clf_ls = []
     f1_clf_ls = []
+    acc_clf_ls = []
+    recall_clf_ls = []
 
     # Evaluate each dataset object separately.
     for obj in objects:
@@ -480,7 +527,7 @@ def eval_finished_run(dataset, dataset_base_dir, anomaly_maps_dir, output_dir, s
             
         if eval_clf:
         # Evaluate classification performance
-            auroc_clf, ap_clf, f1_clf = \
+            auroc_clf, ap_clf, f1_clf, acc_clf, recall_clf = \
                 eval_classification(
                     gt_filenames,
                     prediction_filenames,
@@ -489,11 +536,15 @@ def eval_finished_run(dataset, dataset_base_dir, anomaly_maps_dir, output_dir, s
             evaluation_dict[obj]['classification_AUROC'] = auroc_clf
             evaluation_dict[obj]['classification_AP'] = ap_clf
             evaluation_dict[obj]['classification_F1'] = f1_clf
+            evaluation_dict[obj]['classification_acc'] = acc_clf
+            evaluation_dict[obj]['classification_recall'] = recall_clf
 
             # Keep track of the mean performance measures.
             auroc_clf_ls.append(auroc_clf)
             ap_clf_ls.append(ap_clf)
             f1_clf_ls.append(f1_clf)
+            acc_clf_ls.append(acc_clf)
+            recall_clf_ls.append(recall_clf)
 
     # Compute the mean of the performance measures.
     if eval_segm:
@@ -504,7 +555,8 @@ def eval_finished_run(dataset, dataset_base_dir, anomaly_maps_dir, output_dir, s
         evaluation_dict['mean_classification_au_roc'] = np.mean(auroc_clf_ls).item()
         evaluation_dict['mean_classification_ap'] = np.mean(ap_clf_ls).item()
         evaluation_dict['mean_classification_f1'] = np.mean(f1_clf_ls).item()
-    
+        evaluation_dict['mean_classification_acc'] = np.mean(acc_clf_ls).item()
+        evaluation_dict['mean_classification_recall'] = np.mean(recall_clf_ls).item()
     if seed is not None:
         metric_file = f"metrics_seed={seed}.json"
     else:

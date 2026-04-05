@@ -5,6 +5,7 @@ import torchvision.models as models
 from PIL import Image
 from torchvision import transforms
 from sklearn.decomposition import PCA
+from transformers import AutoImageProcessor, AutoModel
 import numpy as np
 
 
@@ -173,6 +174,96 @@ class DINOv2Wrapper(VisionTransformerWrapper):
             mask = np.ones_like(first_pc, dtype=bool)
         return mask.squeeze()
 
+# DINOv3 Wrapper (Transformers)
+class DINOv3Wrapper(VisionTransformerWrapper):
+    def load_model(self):
+        """
+        model_name examples:
+          - "dinov3-vitb16-pretrain-lvd1689m"
+          - "facebook/dinov3-vitb16-pretrain-lvd1689m"
+        """
+        # allow short name
+        if "/" not in self.model_name:
+            hf_id = f"facebook/{self.model_name}"
+        else:
+            hf_id = self.model_name
+
+        self.processor = AutoImageProcessor.from_pretrained(hf_id)
+        model = AutoModel.from_pretrained(hf_id)
+        model.eval()
+        model = model.to(self.device)
+
+        # patch size (usually 16 for DINOv3 ViTs)
+        self.patch_size = getattr(model.config, "patch_size", 16)
+
+        return model
+
+    def prepare_image(self, img):
+        if isinstance(img, str):
+            img = Image.open(img).convert("RGB")
+        elif isinstance(img, np.ndarray):
+            img = Image.fromarray(img)
+
+        # Force square resize to smaller_edge_size (like your other pipeline)
+        inputs = self.processor(
+            images=img,
+            return_tensors="pt",
+            do_resize=True,
+            size={"height": self.smaller_edge_size, "width": self.smaller_edge_size},
+        )
+
+        # pixel_values: [1,3,H,W] -> we return [3,H,W] (like DINOv2Wrapper)
+        image_tensor = inputs["pixel_values"][0]
+
+        # Ensure dims multiple of patch size (safety)
+        c, h, w = image_tensor.shape
+        cropped_w = w - (w % self.patch_size)
+        cropped_h = h - (h % self.patch_size)
+        image_tensor = image_tensor[:, :cropped_h, :cropped_w]
+
+        grid_size = (cropped_h // self.patch_size, cropped_w // self.patch_size)
+        return image_tensor, grid_size
+
+    def extract_features(self, image_tensor):
+        """
+        Returns patch tokens only: shape [N, C] numpy
+        """
+        with torch.inference_mode():
+            if self.half_precision:
+                image_batch = image_tensor.unsqueeze(0).half().to(self.device)
+            else:
+                image_batch = image_tensor.unsqueeze(0).to(self.device)
+
+            outputs = self.model(pixel_values=image_batch)
+        
+            # tokens = outputs.last_hidden_state  # [B, 1+N, C]
+            # patch_tokens = tokens[:, 1:, :]     # drop CLS -> [B, N, C]
+            # patch_tokens = patch_tokens[0]      # [N, C]
+            tokens = outputs.last_hidden_state[0]
+            n_patches = 16 * 16
+            patch_tokens = tokens[-n_patches:, :]
+
+        return patch_tokens.detach().float().cpu().numpy()
+
+    def compute_background_mask(self, img_features, grid_size, threshold=10, masking_type=False):
+        # Keep all patches (safe default). You can later implement a DINOv3-specific mask if needed.
+        return np.ones(img_features.shape[0], dtype=bool)
+
+    def get_embedding_visualization(self, tokens, grid_size, resized_mask=None, normalize=True):
+        # optional, same as your other wrappers
+        pca = PCA(n_components=3, svd_solver='randomized')
+        if resized_mask is not None:
+            tokens = tokens[resized_mask]
+        reduced_tokens = pca.fit_transform(tokens.astype(np.float32))
+        if resized_mask is not None:
+            tmp = np.zeros((*resized_mask.shape, 3), dtype=reduced_tokens.dtype)
+            tmp[resized_mask] = reduced_tokens
+            reduced_tokens = tmp
+        reduced_tokens = reduced_tokens.reshape((*grid_size, -1))
+        if normalize:
+            return (reduced_tokens - reduced_tokens.min()) / (reduced_tokens.max() - reduced_tokens.min() + 1e-12)
+        return reduced_tokens
+
 
 def get_model(model_name, device, smaller_edge_size=448):
     print(f"Loading model: {model_name}")
@@ -183,5 +274,7 @@ def get_model(model_name, device, smaller_edge_size=448):
         return ViTWrapper(model_name, device, smaller_edge_size)
     elif model_name.startswith("dinov2"):
         return DINOv2Wrapper(model_name, device, smaller_edge_size)
+    elif model_name.startswith("dinov3") or model_name.startswith("facebook/dinov3"):
+        return DINOv3Wrapper(model_name, device, smaller_edge_size)
     else:
         raise ValueError(f"Unknown model name: {model_name}")

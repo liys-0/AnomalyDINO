@@ -76,7 +76,6 @@ def get_dataset_info(dataset, preprocess, data_path=None):
         raise ValueError(f"Preprocessing '{preprocess}' not yet covered!")
     
     if dataset == "MVTec":
-        """
         objects = ["bottle", "cable", "capsule", "carpet", "grid", "hazelnut", "leather", "metal_nut", "pill", "screw", "tile", "toothbrush", "transistor", "wood", "zipper"]
         object_anomalies = {"bottle": ["broken_large", "broken_small", "contamination"],
                             "cable": ["bent_wire", "cable_swap", "combined", "cut_inner_insulation", "cut_outer_insulation", "missing_wire", "missing_cable", "poke_insulation"],
@@ -94,16 +93,11 @@ def get_dataset_info(dataset, preprocess, data_path=None):
                             "wood": ["color", "combined", "hole", "liquid", "scratch"],
                             "zipper": ["broken_teeth", "combined", "fabric_border", "fabric_interior", "rough", "split_teeth", "squeezed_teeth"]
                             }
-        """
-        objects = ["pcb"]
-        object_anomalies = {"pcb":["defect"]}
 
-                
         if preprocess in ["agnostic", "informed", "masking_only"]:
             # Define Masking for the different objects -> determine with Masking Test (see Fig. 2 and discussion in the paper)
             # True: default masking (threshold the first PCA component > 10)
             # False: No masking will be applied
-            """
             masking_default = {"bottle": False,      
                                 "cable": False,         # no masking
                                 "capsule": True,        # default masking
@@ -120,10 +114,8 @@ def get_dataset_info(dataset, preprocess, data_path=None):
                                 "wood": False,
                                 "zipper": False
                                 }
-            """
-            masking_default = {"pcb": False}
+            
         if preprocess in ["informed", "informed_no_mask"]:
-            """
             rotation_default = {"bottle": False,
                                 "cable": False, 
                                 "capsule": False,
@@ -140,8 +132,7 @@ def get_dataset_info(dataset, preprocess, data_path=None):
                                 "wood": False,
                                 "zipper": False
                                 }
-            """
-            rotation_default = {"pcb":True}
+
         elif preprocess in ["agnostic", "agnostic_no_mask"]:
             rotation_default = {o: True for o in objects}
         elif preprocess == "masking_only":

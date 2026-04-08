@@ -9,6 +9,7 @@ from transformers import AutoImageProcessor, AutoModel
 import numpy as np
 
 
+# torch.hub.set_dir(str("/homes/yusha/AnomalyDINO/cache/"))  # Set the directory for torch.hub to avoid permission issues
 # Base Wrapper Class
 class VisionTransformerWrapper:
     def __init__(self, model_name, device, smaller_edge_size=224, half_precision=False):
@@ -187,7 +188,9 @@ class DINOv3Wrapper(VisionTransformerWrapper):
             hf_id = f"facebook/{self.model_name}"
         else:
             hf_id = self.model_name
-
+        # hf_id = "facebook/dinov3-vitl16-pretrain-lvd1689m"
+        #  hf_id = "facebook/dinov3_vitl16_pretrain_lvd1689m"
+        print(hf_id)
         self.processor = AutoImageProcessor.from_pretrained(hf_id)
         model = AutoModel.from_pretrained(hf_id)
         model.eval()

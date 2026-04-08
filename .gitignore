@@ -6,6 +6,8 @@ data_utils/*
 paper_plots*/
 paper_tables*/
 results*/
+slurm_output/
 *personal.ipynb
 feature_extraction.ipynb
 src/__pycache__/
+cache/

@@ -113,8 +113,9 @@ if __name__ == "__main__":
     )
 
     # set CUDA device
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device[-1])
+    #os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device[-1])
     model = get_model(args.model_name, "cuda", smaller_edge_size=args.resolution)
+
 
     if not args.model_name.startswith("dinov2"):
         masking_default = {o: False for o in objects}
